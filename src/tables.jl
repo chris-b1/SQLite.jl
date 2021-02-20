@@ -103,6 +103,38 @@ function DBInterface.execute(stmt::Stmt, params=())
 end
 
 """
+    DBInterface.execute(db::SQLite.DB, sql::String, schema::Tables.Schema, [params])
+
+Using the given `schema`, query and materialize a row table of NamedTuples.
+
+WARNING: if actual data stored in SQLite is of different types than the schema,
+it will be silently promoted. If unsure about actual data, do not use this method, and instead 
+use the two parameter `DBInterface.execute(db, sql)` instead, which is slower but safer
+"""
+@generated function DBInterface.execute(db::DB, sql::AbstractString, ::Tables.Schema{N, T}, params=()) where {N, T}
+    value_fxs = map(enumerate(T.types)) do (i, typ)
+        :(sqlitevalue($typ, stmt.handle, $i))
+    end
+
+    return quote
+        res = NamedTuple{$N, $T}[]
+        stmt = Stmt(db, sql)
+        status = execute(stmt, params)
+        while true
+            push!(res, 
+                NamedTuple{$N}(($(value_fxs...),))
+            )
+            if sqlite3_step(stmt.handle) == SQLITE_DONE
+                return res
+            end
+        end
+
+        return res
+    end
+end
+
+
+"""
     SQLite.createtable!(db::SQLite.DB, table_name, schema::Tables.Schema; temp=false, ifnotexists=true)
 
 Create a table in `db` with name `table_name`, according to `schema`, which is a set of column names and types, constructed like `Tables.Schema(names, types)`
@@ -196,3 +228,4 @@ function load!(::Nothing, rows, db::DB, nm::AbstractString, name, shouldcreate; 
 
     return name
 end
+
